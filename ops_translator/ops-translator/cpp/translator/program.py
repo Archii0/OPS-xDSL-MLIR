@@ -2,7 +2,7 @@ import re
 
 from typing import List, Dict
 
-from ops import Const, OpsError
+from ops import Const, OpsError, ArgIdx
 from store import Program
 from util import SourceBuffer, Rewriter, findIdx
 
@@ -56,47 +56,18 @@ def translateProgram(source: str, program: Program, app_consts: List[Const], loo
         if len(args) < 4:
             print(f"Warning: Not enough arguments for loop at line {loop.loc.line}")
             continue
-        
-        name_arg = args[0]
-        block_arg = args[1]
-        dim_arg = args[2]
-        range_arg = args[3]
+
         ops_args = args[4:]
         
         # Generate transformed code
         indent = len(before) - len(before.lstrip())
-        indent_str = " " * indent
-        
-        transformed = f"{indent_str}{{\n"
-        transformed += f"{indent_str}\tint dim = {dim_arg};\n"
-        
-        # Handle range argument - if its an array literal, extract it
-        if range_arg.strip().startswith('{'):
-            transformed += f"{indent_str}\tint range[] = {range_arg};\n"
-            range_ref = "range"
-        else:
-            range_ref = range_arg
-
-        # Handle block argument - check if it's a function call or variable
-        if 'ops_decl_block' in block_arg or '(' in block_arg:
-            transformed += f"{indent_str}\tops_block block_temp = {block_arg};\n"
-            block_ref = "&block_temp"
-        else:
-            block_ref = f"&{block_arg}"
-
+        indent_str = " " * (indent - 1)
+    
         # Create
-        ops_arg_refs = []
-        for i, ops_arg in enumerate(ops_args):
-
-            if '(' in ops_arg:
-                transformed += f"{indent_str}\tops_arg temp_arg{i} = {ops_arg};\n"
-                ops_arg_refs.append(f"&temp_arg{i}")
-            else:
-                ops_arg_refs.append(f"&{ops_arg.strip()}")
-        
-        ops_arg_refs = ", ".join(f"&temp_arg{i}" for i in range(len(ops_args)))
-        transformed += f"{indent_str}\t{function_name}({name_arg}, {block_ref}, &dim, {range_ref}, {ops_arg_refs});\n"
-        transformed += f"{indent_str}}}\n"
+        ops_arg_refs = ", ".join(
+            ops_arg + '.data' for ops_arg in ops_args if ops_arg != 'ops_arg_idx()'
+        )
+        transformed = f"{indent_str}\t{function_name}({ops_arg_refs});\n"
         
         # Replace all lines from start_line to end_line with transformed code
         buffer.update(start_line, transformed)
@@ -113,8 +84,9 @@ def translateProgram(source: str, program: Program, app_consts: List[Const], loo
     # Extern C is used to stop name mangling
     for loop in program.loops:
         function_name = loop_to_function_name[loop]
-        
-        prototype = f'void {function_name}(char const *, ops_block*, int*, int*{", ops_arg*" * len(loop.args)});\n'
+
+        non_idx_arg_count = len([arg for arg in loop.args if not isinstance(arg, ArgIdx)])
+        prototype = f'void {function_name}({", ".join(["char*"] * non_idx_arg_count)});\n'
         buffer.insert(index, prototype)
 
     buffer.insert(index, '}\n')

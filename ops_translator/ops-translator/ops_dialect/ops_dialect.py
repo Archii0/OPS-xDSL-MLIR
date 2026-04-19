@@ -63,10 +63,10 @@ class ExtractArgDatDataOp(IRDLOperation):
 class ParLoopOp(IRDLOperation):
 
     name = "ops.par_loop"
-    kernel_name_ptr = operand_def()
-    block = operand_def()
-    dim = operand_def()
-    range_ptr = operand_def()
+    # kernel_name_ptr = operand_def()
+    # block = operand_def()
+    # dim = operand_def()
+    # range_ptr = operand_def()
 
     dats = var_operand_def()
     idx = opt_operand_def()

@@ -47,46 +47,8 @@ class LowerParLoopPass(ModulePass):
         """Lower a single ops.par_loop operation"""
         
         builder = Builder(InsertPoint.before(par_loop))
-     
-        field_operands = []
-        reduction_operands = []
 
-        for ops_arg_ptr in par_loop.dats:
-            # extract data from each arg_dat
-
-            ops_arg = self.extract_arg(builder, ops_arg_ptr)
-            dat = self.extract_arg_dat(builder, ops_arg)
-            data = self.extract_arg_dat_data(builder, dat)
-            data_ref = self.create_ptr_to_ref(builder, data)
-            data_field = self.create_ref_to_field(builder, data_ref)
-
-            field_operands.append(data_field)
-
-
-        # Process reduction arguments
-        for ops_arg_ptr in par_loop.reductions:
-            # ops_arg = self.extract_arg(builder, ops_arg_ptr)
-            ops_reduction = self.extract_arg_reduction_handle(builder, ops_arg_ptr)
-            reduction_data_ptr = self.extract_reduction_data_ptr(builder, ops_reduction)
-            reduction_memref = self.create_red_ptr_to_ref(builder, reduction_data_ptr)
-            reduction_operands.append(reduction_memref)
-
-
-        builder.insert(func.CallOp(
-            callee=self.config.name + "_impl",
-            arguments=[*field_operands, *reduction_operands],
-            return_types=[]    
-        ))
-
-        # Make the impl function here
-        # Then call it with the arguments (field_operands and reduction_operands)
-        # Then place the ops.compute op in the impl function
-
-        # ---------------------------
-
-        builder = Builder(InsertPoint.at_end(module.body.block))  
-
-        param_types = [v.type for v in [*field_operands, *reduction_operands]]
+        param_types = [v.type for v in par_loop.operands]
 
         entry_block = Block(arg_types=param_types)
 
@@ -94,27 +56,9 @@ class LowerParLoopPass(ModulePass):
         for i in range(len(entry_block.args)):
             entry_block.args[i].name_hint = 'ops_arg' + str(i)
 
-        fn = func.FuncOp(
-            name=self.config.name + "_impl",
-            function_type=func.FunctionType.from_lists(param_types, []),
-            #     inputs=param_types,
-            #     outputs=LLVMVoidType(),
-            # ),
-            # linkage=LinkageAttr("external"),
-            region=Region([entry_block]),
-        )
-
-        fn_op = builder.insert(fn)
-
-        builder1 = Builder(InsertPoint.at_end(entry_block))
-
-        builder1.insert(ComputeOp.create(
-            operands=[*(fn_op.args)], #? 
+        builder.insert(ComputeOp.create(
+            operands=par_loop.operands 
         ))
-
-        builder1.insert(func.ReturnOp())
-
-        # ---------------------------
 
         par_loop.detach()
         par_loop.erase()

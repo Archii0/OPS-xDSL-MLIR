@@ -1,7 +1,7 @@
 from util import Findable
 from strategy import Strategy
 from store import Application, Program
-from ops_dialect.generate_ir import create_wrapper_func, add_ops_operations
+from ops_dialect.generate_ir import create_new_func, add_ops_operations
 from xdsl.context import Context
 from ops_dialect.lower_par_loop import LowerParLoopPass
 from ops_dialect.lower_compute import LowerComputePass
@@ -58,22 +58,21 @@ class Pipeline(Findable):
         # Build starting IR
         xdsl_ctx = Context()
 
-        ir_module = create_wrapper_func(kernel_config)
+        ir_module = create_new_func(kernel_config)
         ir_module = add_ops_operations(ir_module, kernel_config)
 
         pm = xDSLPassManager([
             LowerParLoopPass(kernel_config),
             LowerComputePass(kernel_config),
-            LowerOpsExtractionsPass(),
-            LowerPtrToMemrefPass(kernel_config),
-            # StencilBufferize(), not needed as OPS has grid memory predefined!
+            # LowerOpsExtractionsPass(),
+            # LowerPtrToMemrefPass(kernel_config),
+            # # StencilBufferize(), not needed as OPS has grid memory predefined!
             ConvertStencilToLLMLIRPass(),
             LowerOpsIndexPass(),
             CanonicalizePass()
         ])
 
         pm.apply(xdsl_ctx, ir_module)
-
 
         # OPTIONAL: Print IR to file for debugging purposes
         # with open("demofile.mlir", "w") as f:
@@ -90,6 +89,9 @@ class Pipeline(Findable):
             pm.apply(xdsl_ctx, ir_module)
 
         # Once all xDSL passes are applied, convert the IR to an MLIR module
+
+        # print(ir_module)
+        # exit(0)
         mlir_module, mlir_ctx = self.convertToMLIRModule(ir_module)
 
         result = self.run_mlir_passes(mlir_module, mlir_ctx)

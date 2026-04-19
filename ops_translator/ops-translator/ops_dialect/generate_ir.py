@@ -23,7 +23,8 @@ from xdsl.dialects.func import (
 )
 from xdsl.dialects.builtin import (
     ModuleOp,
-    IntegerType, 
+    IntegerType,
+    MemRefType,
 )
 
 from typing import Optional
@@ -33,9 +34,36 @@ from .ops_types import *
 
 from xdsl.dialects.builtin import ModuleOp, FunctionType, IndexType, IntegerType, NoneType
 from xdsl.dialects.func import FuncOp, ReturnOp
+from xdsl.dialects import stencil
 from xdsl.ir import Block, Region
 from xdsl.builder import Builder, InsertPoint
 from kernel_config import KernelConfig
+
+def create_new_func(config: KernelConfig) -> ModuleOp:
+    module = ModuleOp([])
+
+    builder = Builder(InsertPoint.at_start(module.body.block))
+
+    fn_name = config.name
+    param_types = [
+        MemRefType(f64, [])
+        if arg_info.arg_type == "reduce"
+        else stencil.FieldType(stencil.StencilBoundsAttr(config.grid_size), f64)
+        for arg_info in config.arg_order
+    ]
+    entry = Block(arg_types=param_types)
+    
+    fn = FuncOp(
+        name=fn_name,
+        function_type=FunctionType.from_lists(param_types, []),
+        region=Region([entry]),
+    )
+    
+    builder.insert(fn)
+    builder = Builder(InsertPoint.at_start(fn.body.block))
+    builder.insert(func.ReturnOp())
+
+    return module
 
 
 def create_wrapper_func(config: KernelConfig) -> ModuleOp:
@@ -330,10 +358,6 @@ def generate_c_wrapper(wrapper_name: str, param_types: list, main_func: LLVMFunc
 
 
 def create_par_loop(
-    kernel_name_ptr: SSAValue,
-    block: SSAValue,
-    dim: SSAValue,
-    range_ptr: SSAValue,
     dat_ptrs: List[SSAValue],
     idx_ptr: Optional[SSAValue],
     reduction_ptrs: List[SSAValue]
@@ -342,10 +366,6 @@ def create_par_loop(
     
     par_loop = ParLoopOp.build(
         operands=[
-            [kernel_name_ptr], 
-            [block], 
-            [dim], 
-            [range_ptr],
             dat_ptrs,
             [idx_ptr] if idx_ptr else [],
             reduction_ptrs
@@ -360,22 +380,17 @@ def add_ops_operations(module: ModuleOp, kernel_config: KernelConfig):
     fn = module.body.ops.first
     print("------------")
     print(fn)
-    # exit(0)cl
+
     fn_body = fn.body.blocks.first
 
     builder = Builder(InsertPoint.at_start(fn_body))
-
-    kernel_name = fn_body.args[0]
-    block = fn_body.args[1]
-    dim = fn_body.args[2]
-    range_ptr = fn_body.args[3]
 
     dat_args = []
     idx_arg = None
     reduction_args = []
 
     for arg_info in kernel_config.arg_order:
-        fn_arg = fn_body.args[4 + arg_info.index]
+        fn_arg = fn_body.args[arg_info.index]
 
         if arg_info.arg_type == "dat":
             dat_args.append(fn_arg)
@@ -385,10 +400,6 @@ def add_ops_operations(module: ModuleOp, kernel_config: KernelConfig):
             reduction_args.append(fn_arg)
 
     op = create_par_loop(
-        kernel_name,
-        block,
-        dim,
-        range_ptr,
         dat_args,
         idx_arg,
         reduction_args
